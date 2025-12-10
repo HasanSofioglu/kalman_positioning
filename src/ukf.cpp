@@ -154,7 +154,27 @@ Eigen::VectorXd UKF::processModel(const Eigen::VectorXd& state, double dt,
     
     Eigen::VectorXd new_state = state;
     
+    // Update the position by directly adding the odometry displacement components
+    new_state(0) += dx;
+    new_state(1) += dy;
+    
+    // Update the orientation and ensure it stays within the normalized range of [-pi, pi]
+    new_state(2) += dtheta;
+    new_state(2) = normalizeAngle(new_state(2));
+    
+    // Compute the velocities based on the displacement over the time step
+    // Only perform division if the time step is significant enough to avoid numerical instability
+    if (dt > 1e-6) {
+        new_state(3) = dx / dt;
+        new_state(4) = dy / dt;
+    } else {
+        // Assume the robot is stationary if the time step is negligible
+        new_state(3) = 0.0;
+        new_state(4) = 0.0;
+    }
+
     return new_state;
+
 }
 
 // ============================================================================
@@ -177,7 +197,31 @@ Eigen::Vector2d UKF::measurementModel(const Eigen::VectorXd& state, int landmark
         return Eigen::Vector2d::Zero();
     }
     
-    return Eigen::Vector2d::Zero();
+    // Retrieve the true global position of the landmark from the map
+    std::pair<double, double> lm = landmarks_.at(landmark_id);
+    double lx = lm.first;
+    double ly = lm.second;
+
+    // Extract the robot's current estimated position and orientation
+    double rx = state(0);
+    double ry = state(1);
+    double theta = state(2);
+
+    // Calculate the difference between the landmark and the robot in the global frame
+    double dx = lx - rx;
+    double dy = ly - ry;
+
+    // Transform this global difference into the robot's local body frame
+    // This requires rotating the vector by the robot's orientation angle theta
+    // The rotation matrix allows us to predict where the sensor should see the landmark
+    double cos_t = std::cos(theta);
+    double sin_t = std::sin(theta);
+
+    Eigen::Vector2d z_predicted;
+    z_predicted(0) = cos_t * dx + sin_t * dy;  // Relative X in robot frame
+    z_predicted(1) = -sin_t * dx + cos_t * dy; // Relative Y in robot frame
+
+    return z_predicted;
 }
 
 // ============================================================================
@@ -208,7 +252,50 @@ void UKF::predict(double dt, double dx, double dy, double dtheta) {
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
     
-    std::cout << "UKF Predict: TODO - Implement prediction step" << std::endl;
+    // First, generate the sigma points based on the current state estimate and covariance
+    // These points represent the probability distribution of where the robot might be
+    std::vector<Eigen::VectorXd> sigma_points = generateSigmaPoints(x_, P_);
+
+    // Propagate each sigma point through the nonlinear process model
+    // This simulates how the robot moves for each possible state in our distribution
+    std::vector<Eigen::VectorXd> predicted_sigmas;
+    predicted_sigmas.resize(2 * nx_ + 1);
+
+    for (size_t i = 0; i < sigma_points.size(); ++i) {
+        predicted_sigmas[i] = processModel(sigma_points[i], dt, dx, dy, dtheta);
+    }
+
+    // Calculate the predicted state mean by taking the weighted sum of the transformed sigma points
+    Eigen::VectorXd x_pred = Eigen::VectorXd::Zero(nx_);
+    for (size_t i = 0; i < predicted_sigmas.size(); ++i) {
+        x_pred += Wm_[i] * predicted_sigmas[i];
+    }
+
+    // Calculate the predicted state covariance matrix
+    // This involves computing the weighted outer product of the difference between 
+    // each sigma point and the predicted mean
+    Eigen::MatrixXd P_pred = Eigen::MatrixXd::Zero(nx_, nx_);
+    for (size_t i = 0; i < predicted_sigmas.size(); ++i) {
+        // Calculate the difference between the sigma point and the mean
+        Eigen::VectorXd diff = predicted_sigmas[i] - x_pred;
+        
+        // Normalize the angle difference to ensure it stays within valid bounds
+        // This is crucial for correct covariance calculation in orientation
+        diff(2) = normalizeAngle(diff(2));
+
+        P_pred += Wc_[i] * (diff * diff.transpose());
+    }
+
+    // Add the process noise covariance to account for uncertainty in the motion model
+    // This prevents the filter from becoming overconfident
+    P_pred += Q_;
+
+    // Update the filter's internal state and covariance with the new predictions
+    x_ = x_pred;
+    P_ = P_pred;
+    
+    // Final safety normalization of the orientation angle
+    x_(2) = normalizeAngle(x_(2));
 }
 
 // ============================================================================
@@ -235,7 +322,77 @@ void UKF::update(const std::vector<std::tuple<int, double, double, double>>& lan
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
     
-    std::cout << "UKF Update: TODO - Implement measurement update step" << std::endl;
+    // Iterate through all available landmark observations to update the state sequentially
+    for (const auto& obs : landmark_observations) {
+        // Extract observation data: ID and relative position (x, y)
+        int id = std::get<0>(obs);
+        double l_x_obs = std::get<1>(obs);
+        double l_y_obs = std::get<2>(obs);
+        
+        // Skip unknown landmarks if they are not in our map
+        if (!hasLandmark(id)) {
+            continue;
+        }
+
+        // Generate sigma points based on the current predicted state
+        // These points capture the distribution of our prediction before measurement update
+        std::vector<Eigen::VectorXd> sigma_points = generateSigmaPoints(x_, P_);
+
+        // Transform sigma points into the measurement space
+        // This predicts where we would see the landmark for each sigma point
+        std::vector<Eigen::VectorXd> z_sigmas;
+        z_sigmas.resize(2 * nx_ + 1);
+        
+        for (size_t i = 0; i < sigma_points.size(); ++i) {
+            z_sigmas[i] = measurementModel(sigma_points[i], id);
+        }
+
+        // Calculate the mean of the predicted measurements
+        Eigen::VectorXd z_pred = Eigen::VectorXd::Zero(nz_);
+        for (size_t i = 0; i < z_sigmas.size(); ++i) {
+            z_pred += Wm_[i] * z_sigmas[i];
+        }
+
+        // Calculate the measurement covariance matrix (S) and the cross-covariance matrix (Pxz)
+        Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nz_, nz_);
+        Eigen::MatrixXd Pxz = Eigen::MatrixXd::Zero(nx_, nz_);
+
+        for (size_t i = 0; i < sigma_points.size(); ++i) {
+            // Difference in state (State Residual)
+            Eigen::VectorXd x_diff = sigma_points[i] - x_;
+            x_diff(2) = normalizeAngle(x_diff(2)); // Normalize angle difference
+
+            // Difference in measurement (Measurement Residual)
+            Eigen::VectorXd z_diff = z_sigmas[i] - z_pred;
+            
+            // Accumulate weighted covariances
+            S += Wc_[i] * (z_diff * z_diff.transpose());
+            Pxz += Wc_[i] * (x_diff * z_diff.transpose());
+        }
+
+        // Add measurement noise to S matrix
+        S += R_;
+
+        // Compute the Kalman Gain
+        // K = Pxz * S_inverse
+        Eigen::MatrixXd K = Pxz * S.inverse();
+
+        // Construct the actual measurement vector from sensor data
+        Eigen::VectorXd z_actual(2);
+        z_actual << l_x_obs, l_y_obs;
+        
+        // Calculate the innovation (residual): Real Measurement - Predicted Measurement
+        Eigen::VectorXd innovation = z_actual - z_pred;
+        
+        // Update the state estimate using the Kalman Gain and innovation
+        x_ += K * innovation;
+        
+        // Update the state covariance matrix
+        P_ -= K * S * K.transpose();
+        
+        // Ensure the final orientation angle is normalized
+        x_(2) = normalizeAngle(x_(2));
+    }
 }
 
 // ============================================================================
