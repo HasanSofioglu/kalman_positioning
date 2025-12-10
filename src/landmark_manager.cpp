@@ -38,13 +38,37 @@ bool LandmarkManager::loadFromCSV(const std::string& csv_path) {
     
     landmarks_.clear();
     std::string line;
-    int line_num = 0;
     
+    
+    // Read line by line
     while (std::getline(file, line)) {
-        ++line_num;
-        
+        // Skip empty lines or comments (starting with #)
         if (line.empty() || line[0] == '#') {
             continue;
+        }
+
+        std::stringstream ss(line);
+        std::string segment;
+        std::vector<std::string> parts;
+
+        // Split line by comma ','
+        while(std::getline(ss, segment, ',')) {
+            parts.push_back(segment);
+        }
+
+        // We expect at least 3 parts: id, x, y
+        if (parts.size() >= 3) {
+            try {
+                int id = std::stoi(parts[0]);
+                double x = std::stod(parts[1]);
+                double y = std::stod(parts[2]);
+                
+                // Store in map: id -> (x, y)
+                landmarks_[id] = std::make_pair(x, y);
+            } catch (const std::exception& e) {
+                std::cerr << "Error parsing line: " << line << " -> " << e.what() << std::endl;
+                continue;
+            }
         }
     }
     
@@ -106,11 +130,17 @@ std::vector<int> LandmarkManager::getLandmarksInRadius(double x, double y, doubl
     // ========================================================================
     
     std::vector<int> result;
+    // Iterate through all loaded landmarks
     for (const auto& [id, pos] : landmarks_) {
-        if (distance(x, y, pos.first, pos.second) <= radius) {
+        // Calculate Euclidean distance: sqrt((x1-x2)^2 + (y1-y2)^2)
+        double dist = distance(x, y, pos.first, pos.second);
+        
+        // If within radius, add ID to results
+        if (dist <= radius) {
             result.push_back(id);
         }
     }
+    
     return result;
 }
 

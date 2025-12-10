@@ -34,7 +34,56 @@ UKF::UKF(double process_noise_xy, double process_noise_theta,
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
     
-    std::cout << "UKF Constructor: TODO - Implement filter initialization" << std::endl;
+
+    // 1. Initialize filter parameters (alpha, beta, kappa, lambda)
+    // Formula: lambda = alpha^2 * (n + kappa) - n
+    lambda_ = ALPHA * ALPHA * (nx_ + KAPPA) - nx_;
+    
+    // gamma = sqrt(n + lambda) -> Scaling factor for sigma points
+    gamma_ = std::sqrt(nx_ + lambda_);
+
+    // 2. Initialize state vector x_ with zeros
+    x_ = Eigen::VectorXd::Zero(nx_);
+
+    // 3. Initialize state covariance matrix P_ as Identity
+    // Identity matrix implies independent uncertainties initially
+    P_ = Eigen::MatrixXd::Identity(nx_, nx_);
+
+    // 4. Set process noise covariance Q_
+    // Task Requirement: Q = diag(process_noise_xy, process_noise_xy, process_noise_theta, 0, 0)
+    Q_ = Eigen::MatrixXd::Zero(nx_, nx_);
+    Q_(0, 0) = process_noise_xy;    // Noise in X
+    Q_(1, 1) = process_noise_xy;    // Noise in Y
+    Q_(2, 2) = process_noise_theta; // Noise in Theta
+    // Velocities (index 3 and 4) assume 0 process noise for this assignment
+
+    // 5. Set measurement noise covariance R_
+    // Task Requirement: R = diag(measurement_noise_xy, measurement_noise_xy)
+    R_ = Eigen::MatrixXd::Identity(nz_, nz_) * measurement_noise_xy;
+
+    // 6. Calculate sigma point weights for mean and covariance
+    // Total sigma points = 2 * n + 1
+    int num_sigmas = 2 * nx_ + 1;
+    Wm_.resize(num_sigmas);
+    Wc_.resize(num_sigmas);
+
+    // -- Weight for the Mean (Center Point) --
+    // Wm_0 = lambda / (n + lambda)
+    Wm_[0] = lambda_ / (double)(nx_ + lambda_);
+    
+    // -- Weight for the Covariance (Center Point) --
+    // Wc_0 = Wm_0 + (1 - alpha^2 + beta)
+    Wc_[0] = Wm_[0] + (1.0 - ALPHA * ALPHA + BETA);
+
+    // -- Weights for remaining sigma points --
+    // Wi = 1 / (2 * (n + lambda))
+    double weight = 0.5 / (nx_ + lambda_);
+    
+    for (int i = 1; i < num_sigmas; ++i) {
+        Wm_[i] = weight;
+        Wc_[i] = weight;
+    }
+    std::cout << "UKF Constructor: TODO - Implement filter initialization" << lambda_ << std::endl;
 }
 
 // ============================================================================
@@ -50,12 +99,39 @@ UKF::UKF(double process_noise_xy, double process_noise_theta,
  * 3. Generate 2*n symmetric sigma points around the mean
  */
 std::vector<Eigen::VectorXd> UKF::generateSigmaPoints(const Eigen::VectorXd& mean,
-                                                       const Eigen::MatrixXd& cov) {
+                                                       const Eigen::MatrixXd& cosv) {
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
     
     std::vector<Eigen::VectorXd> sigma_points;
-    
+    int num_sigmas = 2 * nx_ + 1;
+    sigma_points.resize(num_sigmas);
+
+    // First sigma point is the mean itself
+    sigma_points[0] = mean;
+
+    // Calculate square root of matrix P_scaled = (n + lambda) * P
+    // Using Cholesky decomposition 
+    Eigen::MatrixXd P_scaled = (nx_ + lambda_) * cosv;
+    Eigen::LLT<Eigen::MatrixXd> lltOfP(P_scaled);
+
+    if (lltOfP.info() == Eigen::NumericalIssue) {
+        // If matrix is not positive definite, handle error (fallback to mean)
+        std::cerr << "UKF Error: Covariance matrix decomposition failed!" << std::endl;
+        std::fill(sigma_points.begin(), sigma_points.end(), mean);
+        return sigma_points;
+    }
+
+    Eigen::MatrixXd L = lltOfP.matrixL();
+
+    // Generate remaining sigma points
+    // X_i     = mean + row_of_L
+    // X_{i+n} = mean - row_of_L
+    for (int i = 0; i < nx_; ++i) {
+        sigma_points[i + 1]       = mean + L.col(i);
+        sigma_points[nx_ + i + 1] = mean - L.col(i);
+    }
+
     return sigma_points;
 }
 
