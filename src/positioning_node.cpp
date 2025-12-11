@@ -60,9 +60,10 @@ public:
         
         // Retrieve the parameter values to set up the system
         std::string csv_path = this->get_parameter("landmarks_csv_path").as_string();
-        double p_noise_xy = this->get_parameter("process_noise_xy").as_double();
-        double p_noise_theta = this->get_parameter("process_noise_theta").as_double();
-        measurement_noise_xy_ = this->get_parameter("measurement_noise_xy").as_double();
+            
+        std::string p_noise_xy = this->get_parameter("process_noise_xy").as_string();
+        std::string p_noise_theta = this->get_parameter("process_noise_theta").as_string();
+        std::string measurement_noise_xy_ = this->get_parameter("measurement_noise_xy").as_string();
 
         // Instantiate the Landmark Manager to handle map operations
         landmark_manager_ = std::make_shared<LandmarkManager>();
