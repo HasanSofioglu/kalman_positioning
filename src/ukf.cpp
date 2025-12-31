@@ -4,11 +4,9 @@
 
 /**
  * STUDENT ASSIGNMENT: Unscented Kalman Filter Implementation
- * 
- * This file contains placeholder implementations for the UKF class methods.
+ * * This file contains placeholder implementations for the UKF class methods.
  * Students should implement each method according to the UKF algorithm.
- * 
- * Reference: Wan, E. A., & Van Der Merwe, R. (2000). 
+ * * Reference: Wan, E. A., & Van Der Merwe, R. (2000). 
  * "The Unscented Kalman Filter for Nonlinear Estimation"
  */
 
@@ -18,8 +16,7 @@
 
 /**
  * @brief Initialize the Unscented Kalman Filter
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Initialize filter parameters (alpha, beta, kappa, lambda)
  * 2. Initialize state vector x_ with zeros
  * 3. Initialize state covariance matrix P_ 
@@ -28,63 +25,55 @@
  * 6. Calculate sigma point weights for mean and covariance
  */
 UKF::UKF(double process_noise_xy, double process_noise_theta,
-         double measurement_noise_xy, int num_landmarks)
-    : nx_(5), nz_(2) {
+        double measurement_noise_xy, int num_landmarks) {
     
-    // STUDENT IMPLEMENTATION STARTS HERE
-    // ========================================================================
-    
+    // State dimension [x, y, theta, vx, vy]
+    nx_ = 5; 
 
-    // 1. Initialize filter parameters (alpha, beta, kappa, lambda)
-    // Formula: lambda = alpha^2 * (n + kappa) - n
-    lambda_ = ALPHA * ALPHA * (nx_ + KAPPA) - nx_;
-    
-    // gamma = sqrt(n + lambda) -> Scaling factor for sigma points
-    gamma_ = std::sqrt(nx_ + lambda_);
-
-    // 2. Initialize state vector x_ with zeros
+    // 1. Initialize state vector x as [0, 0, 0, 0, 0]T
     x_ = Eigen::VectorXd::Zero(nx_);
 
-    // 3. Initialize state covariance matrix P_ as Identity
-    // Identity matrix implies independent uncertainties initially
+    // 2. Initialize covariance matrix P as identity matrix
     P_ = Eigen::MatrixXd::Identity(nx_, nx_);
 
-    // 4. Set process noise covariance Q_
-    // Task Requirement: Q = diag(process_noise_xy, process_noise_xy, process_noise_theta, 0, 0)
+    // 3. Set Process Noise Q = diag(xy, xy, theta, 0, 0)
     Q_ = Eigen::MatrixXd::Zero(nx_, nx_);
-    Q_(0, 0) = process_noise_xy;    // Noise in X
-    Q_(1, 1) = process_noise_xy;    // Noise in Y
-    Q_(2, 2) = process_noise_theta; // Noise in Theta
-    // Velocities (index 3 and 4) assume 0 process noise for this assignment
+    Q_(0, 0) = process_noise_xy;
+    Q_(1, 1) = process_noise_xy;
+    Q_(2, 2) = process_noise_theta;
+    Q_(3, 3) = 0.001; // Small velocity noise to keep matrix positive definite
+    Q_(4, 4) = 0.001;
 
-    // 5. Set measurement noise covariance R_
-    // Task Requirement: R = diag(measurement_noise_xy, measurement_noise_xy)
-    R_ = Eigen::MatrixXd::Identity(nz_, nz_) * measurement_noise_xy;
+    // 4. Set Measurement Noise R = diag(xy, xy)
+    R_ = Eigen::MatrixXd::Identity(2, 2) * measurement_noise_xy;
 
-    // 6. Calculate sigma point weights for mean and covariance
-    // Total sigma points = 2 * n + 1
-    int num_sigmas = 2 * nx_ + 1;
-    Wm_.resize(num_sigmas);
-    Wc_.resize(num_sigmas);
-
-    // -- Weight for the Mean (Center Point) --
-    // Wm_0 = lambda / (n + lambda)
-    Wm_[0] = lambda_ / (double)(nx_ + lambda_);
+    // 5. Calculate UKF parameters: lambda and gamma
+    // Standard spreading parameters for UKF
+    double alpha = 0.001; 
+    double kappa = 0.0;
+    double beta = 2.0;
     
-    // -- Weight for the Covariance (Center Point) --
-    // Wc_0 = Wm_0 + (1 - alpha^2 + beta)
-    Wc_[0] = Wm_[0] + (1.0 - ALPHA * ALPHA + BETA);
+    lambda_ = alpha * alpha * (nx_ + kappa) - nx_;
+    gamma_ = std::sqrt(nx_ + lambda_);
 
-    // -- Weights for remaining sigma points --
-    // Wi = 1 / (2 * (n + lambda))
-    double weight = 0.5 / (nx_ + lambda_);
+    // 6. Calculate weights for mean (Wm) and covariance (Wc)
+    Wm_.resize(2 * nx_ + 1);
+    Wc_.resize(2 * nx_ + 1);
     
-    for (int i = 1; i < num_sigmas; ++i) {
-        Wm_[i] = weight;
-        Wc_[i] = weight;
+    // Weight for the center point
+    Wm_[0] = lambda_ / (nx_ + lambda_);
+    Wc_[0] = Wm_[0] + (1.0 - alpha * alpha + beta);
+    
+    // Weights for the surrounding sigma points
+    double common_weight = 1.0 / (2.0 * (nx_ + lambda_));
+    for (int i = 1; i < 2 * nx_ + 1; i++) {
+        Wm_[i] = common_weight;
+        Wc_[i] = common_weight;
     }
-    std::cout << "UKF Constructor: TODO - Implement filter initialization" << lambda_ << std::endl;
-}
+
+    // Suppress unused parameter warning for num_landmarks
+    (void)num_landmarks;
+}/* */
 
 // ============================================================================
 // SIGMA POINT GENERATION
@@ -92,8 +81,7 @@ UKF::UKF(double process_noise_xy, double process_noise_theta,
 
 /**
  * @brief Generate sigma points from mean and covariance
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Start with the mean as the first sigma point
  * 2. Compute Cholesky decomposition of covariance
  * 3. Generate 2*n symmetric sigma points around the mean
@@ -102,37 +90,33 @@ std::vector<Eigen::VectorXd> UKF::generateSigmaPoints(const Eigen::VectorXd& mea
                                                        const Eigen::MatrixXd& cosv) {
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
+
+
+    int n = nx_; 
     
-    std::vector<Eigen::VectorXd> sigma_points;
-    int num_sigmas = 2 * nx_ + 1;
-    sigma_points.resize(num_sigmas);
+    // Compute the Cholesky decomposition (square root) of the covariance matrix
+    // This gives us the spread needed for the sigma points
+    Eigen::MatrixXd L = cosv.llt().matrixL();
 
-    // First sigma point is the mean itself
-    sigma_points[0] = mean;
+    // Create a temporary matrix to hold the points before converting to vector
+    Eigen::MatrixXd sigma_mat = Eigen::MatrixXd(n, 2 * n + 1);
 
-    // Calculate square root of matrix P_scaled = (n + lambda) * P
-    // Using Cholesky decomposition 
-    Eigen::MatrixXd P_scaled = (nx_ + lambda_) * cosv;
-    Eigen::LLT<Eigen::MatrixXd> lltOfP(P_scaled);
+    // 1. The first point is simply the current mean
+    sigma_mat.col(0) = mean;
 
-    if (lltOfP.info() == Eigen::NumericalIssue) {
-        // If matrix is not positive definite, handle error (fallback to mean)
-        std::cerr << "UKF Error: Covariance matrix decomposition failed!" << std::endl;
-        std::fill(sigma_points.begin(), sigma_points.end(), mean);
-        return sigma_points;
+    // 2. Generate the surrounding points in both directions (+ and -)
+    for (int i = 0; i < n; i++) {
+        sigma_mat.col(i + 1)     = mean + gamma_ * L.col(i);
+        sigma_mat.col(i + 1 + n) = mean - gamma_ * L.col(i);
     }
 
-    Eigen::MatrixXd L = lltOfP.matrixL();
-
-    // Generate remaining sigma points
-    // X_i     = mean + row_of_L
-    // X_{i+n} = mean - row_of_L
-    for (int i = 0; i < nx_; ++i) {
-        sigma_points[i + 1]       = mean + L.col(i);
-        sigma_points[nx_ + i + 1] = mean - L.col(i);
+    // Convert the Eigen Matrix columns into a std::vector for easier handling later
+    std::vector<Eigen::VectorXd> sigma_vec;
+    for (int i = 0; i < 2 * n + 1; ++i) {
+        sigma_vec.push_back(sigma_mat.col(i));
     }
 
-    return sigma_points;
+    return sigma_vec;
 }
 
 // ============================================================================
@@ -141,8 +125,7 @@ std::vector<Eigen::VectorXd> UKF::generateSigmaPoints(const Eigen::VectorXd& mea
 
 /**
  * @brief Apply motion model to a state vector
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Updates position: x' = x + dx, y' = y + dy
  * 2. Updates orientation: theta' = theta + dtheta (normalized)
  * 3. Updates velocities: vx' = dx/dt, vy' = dy/dt
@@ -151,29 +134,33 @@ Eigen::VectorXd UKF::processModel(const Eigen::VectorXd& state, double dt,
                                   double dx, double dy, double dtheta) {
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
-    
-    Eigen::VectorXd new_state = state;
-    
-    // Update the position by directly adding the odometry displacement components
-    new_state(0) += dx;
-    new_state(1) += dy;
-    
-    // Update the orientation and ensure it stays within the normalized range of [-pi, pi]
-    new_state(2) += dtheta;
-    new_state(2) = normalizeAngle(new_state(2));
-    
-    // Compute the velocities based on the displacement over the time step
-    // Only perform division if the time step is significant enough to avoid numerical instability
+
+    // STUDENT IMPLEMENTATION STARTS HERE
+
+    // 1. Create a vector for the predicted state
+    Eigen::VectorXd x_out = state;
+
+    // 2. Update position
+    x_out(0) += dx; // Update x coordinate
+    x_out(1) += dy; // Update y coordinate
+
+    // 3. Update orientation and normalize it
+    x_out(2) += dtheta; // Update theta
+    // Normalize angle to [-pi, pi] using a while loop or atan2 logic
+    while (x_out(2) > M_PI)  x_out(2) -= 2.0 * M_PI;
+    while (x_out(2) < -M_PI) x_out(2) += 2.0 * M_PI;
+
+    // 4. Calculate velocities
+    // Avoid division by zero if dt is extremely small
     if (dt > 1e-6) {
-        new_state(3) = dx / dt;
-        new_state(4) = dy / dt;
+        x_out(3) = dx / dt; // Velocity vx
+        x_out(4) = dy / dt; // Velocity vy
     } else {
-        // Assume the robot is stationary if the time step is negligible
-        new_state(3) = 0.0;
-        new_state(4) = 0.0;
+        x_out(3) = 0.0;
+        x_out(4) = 0.0;
     }
 
-    return new_state;
+    return x_out;
 
 }
 
@@ -183,8 +170,7 @@ Eigen::VectorXd UKF::processModel(const Eigen::VectorXd& state, double dt,
 
 /**
  * @brief Predict measurement given current state and landmark
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Calculate relative position: landmark - robot position
  * 2. Transform to robot frame using robot orientation
  * 3. Return relative position in robot frame
@@ -240,8 +226,7 @@ double UKF::normalizeAngle(double angle) {
 
 /**
  * @brief Kalman Filter Prediction Step (Time Update)
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Generate sigma points from current state and covariance
  * 2. Propagate each sigma point through motion model
  * 3. Calculate mean and covariance of predicted sigma points
@@ -304,8 +289,7 @@ void UKF::predict(double dt, double dx, double dy, double dtheta) {
 
 /**
  * @brief Kalman Filter Update Step (Measurement Update)
- * 
- * STUDENT TODO:
+ * * STUDENT TODO:
  * 1. Generate sigma points
  * 2. Transform through measurement model
  * 3. Calculate predicted measurement mean
@@ -321,48 +305,48 @@ void UKF::update(const std::vector<std::tuple<int, double, double, double>>& lan
     
     // STUDENT IMPLEMENTATION STARTS HERE
     // ========================================================================
+    int nz = 2; 
     
-    // Iterate through all available landmark observations to update the state sequentially
+    // Iterate through all available landmark observations
     for (const auto& obs : landmark_observations) {
-        // Extract observation data: ID and relative position (x, y)
+        
         int id = std::get<0>(obs);
         double l_x_obs = std::get<1>(obs);
         double l_y_obs = std::get<2>(obs);
         
-        // Skip unknown landmarks if they are not in our map
         if (!hasLandmark(id)) {
             continue;
         }
 
-        // Generate sigma points based on the current predicted state
-        // These points capture the distribution of our prediction before measurement update
+        // 1. Generate sigma points (Burada n_ kullaniyoruz, bu dogru)
         std::vector<Eigen::VectorXd> sigma_points = generateSigmaPoints(x_, P_);
 
-        // Transform sigma points into the measurement space
-        // This predicts where we would see the landmark for each sigma point
+        // 2. Transform sigma points into measurement space
         std::vector<Eigen::VectorXd> z_sigmas;
-        z_sigmas.resize(2 * nx_ + 1);
+        z_sigmas.resize(2 * nx_ + 1); // n_ sinif degiskeni
         
         for (size_t i = 0; i < sigma_points.size(); ++i) {
             z_sigmas[i] = measurementModel(sigma_points[i], id);
         }
 
-        // Calculate the mean of the predicted measurements
-        Eigen::VectorXd z_pred = Eigen::VectorXd::Zero(nz_);
+        // 3. Calculate mean predicted measurement
+        // BURASI DUZELDI: nz_ degil nz
+        Eigen::VectorXd z_pred = Eigen::VectorXd::Zero(nz); 
         for (size_t i = 0; i < z_sigmas.size(); ++i) {
             z_pred += Wm_[i] * z_sigmas[i];
         }
 
-        // Calculate the measurement covariance matrix (S) and the cross-covariance matrix (Pxz)
-        Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nz_, nz_);
-        Eigen::MatrixXd Pxz = Eigen::MatrixXd::Zero(nx_, nz_);
+        // 4. Calculate covariance matrices
+        // BURASI DUZELDI: nz_ degil nz
+        Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nz, nz);
+        Eigen::MatrixXd Pxz = Eigen::MatrixXd::Zero(nx_, nz); // n_ (state) ve nz (measurement)
 
         for (size_t i = 0; i < sigma_points.size(); ++i) {
-            // Difference in state (State Residual)
+            // State residual
             Eigen::VectorXd x_diff = sigma_points[i] - x_;
-            x_diff(2) = normalizeAngle(x_diff(2)); // Normalize angle difference
+            x_diff(2) = normalizeAngle(x_diff(2)); 
 
-            // Difference in measurement (Measurement Residual)
+            // Measurement residual
             Eigen::VectorXd z_diff = z_sigmas[i] - z_pred;
             
             // Accumulate weighted covariances
@@ -370,27 +354,22 @@ void UKF::update(const std::vector<std::tuple<int, double, double, double>>& lan
             Pxz += Wc_[i] * (x_diff * z_diff.transpose());
         }
 
-        // Add measurement noise to S matrix
+        // Add measurement noise
         S += R_;
 
-        // Compute the Kalman Gain
-        // K = Pxz * S_inverse
+        // 5. Compute Kalman Gain
         Eigen::MatrixXd K = Pxz * S.inverse();
 
-        // Construct the actual measurement vector from sensor data
+        // 6. Innovation
         Eigen::VectorXd z_actual(2);
         z_actual << l_x_obs, l_y_obs;
         
-        // Calculate the innovation (residual): Real Measurement - Predicted Measurement
         Eigen::VectorXd innovation = z_actual - z_pred;
         
-        // Update the state estimate using the Kalman Gain and innovation
+        // 7. Update state and covariance
         x_ += K * innovation;
-        
-        // Update the state covariance matrix
         P_ -= K * S * K.transpose();
         
-        // Ensure the final orientation angle is normalized
         x_(2) = normalizeAngle(x_(2));
     }
 }
