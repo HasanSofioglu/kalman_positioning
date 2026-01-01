@@ -84,6 +84,16 @@ public:
         
         // Provide the filter with the known map data
         ukf_->setLandmarks(landmark_manager_->getLandmarks());
+        // for the RMSE
+        rmse_sum_sq_ = 0.0;
+        rmse_count_ = 0;
+
+        // the sub which listen the Ground Truth 
+        ground_truth_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+            "/robot_gt",
+            rclcpp::QoS(10),
+            std::bind(&PositioningNode::groundTruthCallback, this, std::placeholders::_1)
+        );
     }
 
 private:
@@ -114,6 +124,10 @@ private:
     // Helper variable for time calculation
     rclcpp::Time last_odom_time_;
     double measurement_noise_xy_;
+    // for the rmse  
+    double rmse_sum_sq_;
+    int rmse_count_;
+    rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr ground_truth_sub_;
     // ============================================================================
     // CALLBACK FUNCTIONS
     // ============================================================================
@@ -222,6 +236,40 @@ private:
     // HELPER FUNCTIONS
     // ============================================================================
     
+
+
+    // ========================================================================
+    // GROUND TRUTH CALLBACK (For RMSE Calculation)
+    // ========================================================================
+    void groundTruthCallback(const nav_msgs::msg::Odometry::SharedPtr msg) {
+        // Ensure the filter is initialized before processing
+        if (!ukf_) return;
+
+        // Extract the actual ground truth position from the simulation
+        double true_x = msg->pose.pose.position.x;
+        double true_y = msg->pose.pose.position.y;
+
+        // Retrieve the current estimated position from our UKF
+        Eigen::VectorXd estimated_state = ukf_->getState();
+        double est_x = estimated_state(0);
+        double est_y = estimated_state(1);
+
+        // Calculate the squared error between the estimated and true positions
+        double error_x = true_x - est_x;
+        double error_y = true_y - est_y;
+        double error_sq = (error_x * error_x) + (error_y * error_y);
+
+        // Accumulate the error to compute the running RMSE
+        rmse_sum_sq_ += error_sq;
+        rmse_count_++;
+
+        // Print the current RMSE to the console periodically to track stability
+        if (rmse_count_ % 50 == 0) {
+            double current_rmse = std::sqrt(rmse_sum_sq_ / rmse_count_);
+            RCLCPP_WARN(this->get_logger(), ">>> EXPERIMENT RESULT - Steps: %d | Current RMSE: %.4f <<<", 
+                rmse_count_, current_rmse);
+        }
+    }
     /**
      * @brief Convert quaternion to yaw angle
      * @param q Quaternion from orientation

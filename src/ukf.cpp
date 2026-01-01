@@ -330,14 +330,14 @@ void UKF::update(const std::vector<std::tuple<int, double, double, double>>& lan
         }
 
         // 3. Calculate mean predicted measurement
-        // BURASI DUZELDI: nz_ degil nz
+       
         Eigen::VectorXd z_pred = Eigen::VectorXd::Zero(nz); 
         for (size_t i = 0; i < z_sigmas.size(); ++i) {
             z_pred += Wm_[i] * z_sigmas[i];
         }
 
         // 4. Calculate covariance matrices
-        // BURASI DUZELDI: nz_ degil nz
+        
         Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nz, nz);
         Eigen::MatrixXd Pxz = Eigen::MatrixXd::Zero(nx_, nz); // n_ (state) ve nz (measurement)
 
